@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MizoCraft 3D Lite</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #87CEEB; }
+        #joystick {
+            position: fixed; bottom: 30px; left: 30px; width: 120px; height: 120px;
+            background: rgba(0,0,0,0.3); border-radius: 50%; touch-action: none;
+        }
+        #stick {
+            position: absolute; top: 30px; left: 30px; width: 60px; height: 60px;
+            background: rgba(255,255,255,0.5); border-radius: 50%; pointer-events: none;
+        }
+        #buttons {
+            position: fixed; bottom: 30px; right: 20px; display: flex; flex-direction: column; gap: 15px;
+        }
+       .btn {
+            width: 70px; height: 70px; background: rgba(0,0,0,0.4); border: 2px solid white;
+            border-radius: 15px; color: white; font-size: 24px; font-weight: bold;
+        }
+       .btn:active { background: rgba(255,255,255,0.3); }
+        #crosshair {
+            position: fixed; top: 50%; left: 50%; width: 4px; height: 4px;
+            background: white; margin: -2px 0 0 -2px; pointer-events: none;
+        }
+        #info {
+            position: fixed; top: 10px; left: 10px; color: white; font-family: Arial;
+            background: rgba(0,0,0,0.5); padding: 8px; border-radius: 5px; font-size: 12px;
+        }
+    </style>
+    <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+</head>
+<body>
+    <div id="info">MIZOCRAFT LITE<br>Block: Grass | FPS: <span id="fps">60</span></div>
+    <div id="crosshair"></div>
+    <div id="joystick"><div id="stick"></div></div>
+    <div id="buttons">
+        <button class="btn" id="jumpBtn">⬆️</button>
+        <button class="btn" id="placeBtn">🧱</button>
+        <button class="btn" id="mineBtn">⛏️</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // 1. MOBILE OPTIMIZED SETTINGS
+        const WORLD_SIZE = 16; // 16x16 chauh. A lian chuan a lem
+        const RENDER_DISTANCE = 8; // Block 8 bial chauh a draw
+        let lastTime = performance.now();
+        let frameCount = 0;
+
+        // 2. SCENE - LEM LO TURIN
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        // Fog dah lo, fog hian a ti lem
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 20); // 20 chauh thlir
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(1); // HD off = lem lo
+        // Shadow off = 3x a rang zawk
+        document.body.appendChild(renderer.domElement);
+
+        // 3. LIGHT - 1 chiah
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8)); // Ambient chauh
+
+        // 4. BLOCK - Texture awm lo, rawng chiah
+        const blockGeo = new THREE.BoxGeometry(1, 1, 1);
+        const grassMat = new THREE.MeshBasicMaterial({ color: 0x4CAF50 }); // MeshBasic = lem lo
+        const dirtMat = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
+        const stoneMat = new THREE.MeshBasicMaterial({ color: 0x808080 });
+
+        // 5. WORLD - A te, a tlem
+        const world = {};
+        for(let x = -WORLD_SIZE/2; x < WORLD_SIZE/2; x++) {
+            for(let z = -WORLD_SIZE/2; z < WORLD_SIZE/2; z++) {
+                let y = Math.floor(Math.sin(x*0.5) * Math.cos(z*0.5));
+                addBlock(x, y, z, grassMat);
+                if(y > -2) addBlock(x, y-1, z, dirtMat);
+            }
+        }
+
+        function addBlock(x, y, z, material) {
+            const key = `${x},${y},${z}`;
+            if(world[key]) return;
+            const block = new THREE.Mesh(blockGeo, material);
+            block.position.set(x, y, z);
+            scene.add(block);
+            world[key] = block;
+        }
+
+        function removeBlock(pos) {
+            const key = `${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`;
+            if(world[key]) {
+                scene.remove(world[key]);
+                delete world[key];
+            }
+        }
+
+        // 6. PLAYER + TOUCH CONTROLS
+        camera.position.set(0, 3, 0);
+        let velocity = new THREE.Vector3();
+        let joystick = { active: false, x: 0, y: 0 };
+        let camRot = { x: 0, y: 0 };
+
+        // Joystick
+        const joy = document.getElementById('joystick');
+        const stick = document.getElementById('stick');
+        joy.addEventListener('touchstart', e => { joystick.active = true; });
+        joy.addEventListener('touchmove', e => {
+            if(!joystick.active) return;
+            const rect = joy.getBoundingClientRect();
+            const touch = e.touches[0];
+            joystick.x = (touch.clientX - rect.left - 60) / 60;
+            joystick.y = (touch.clientY - rect.top - 60) / 60;
+            joystick.x = Math.max(-1, Math.min(1, joystick.x));
+            joystick.y = Math.max(-1, Math.min(1, joystick.y));
+            stick.style.transform = `translate(${joystick.x*30}px, ${joystick.y*30}px)`;
+        });
+        joy.addEventListener('touchend', () => {
+            joystick.active = false; joystick.x = 0; joystick.y = 0;
+            stick.style.transform = 'translate(0px, 0px)';
+        });
+
+        // Look - screen swipe
+        let lastTouch = null;
+        document.addEventListener('touchstart', e => {
+            if(e.target.closest('#joystick') || e.target.closest('#buttons')) return;
+            lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        });
+        document.addEventListener('touchmove', e => {
+            if(!lastTouch || e.target.closest('#joystick') || e.target.closest('#buttons')) return;
+            const dx = e.touches[0].clientX - lastTouch.x;
+            const dy = e.touches[0].clientY - lastTouch.y;
+            camRot.y -= dx * 0.005;
+            camRot.x -= dy * 0.005;
+            camRot.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camRot.x));
+            lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        });
+
+        // Buttons
+        document.getElementById('jumpBtn').ontouchstart = () => { if(player.onGround) velocity.y = 0.2; };
+        document.getElementById('mineBtn').ontouchstart = () => { mineBlock(); };
+        document.getElementById('placeBtn').ontouchstart = () => { placeBlock(); };
+
+        // 7. BLOCK INTERACT
+        const raycaster = new THREE.Raycaster();
+        function mineBlock() {
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            const hits = raycaster.intersectObjects(Object.values(world));
+            if(hits.length > 0 && hits[0].distance < 5) removeBlock(hits[0].object.position);
+        }
+        function placeBlock() {
+            raycaster.setFromCamera(new Vector2(0,0), camera);
+            const hits = raycaster.intersectObjects(Object.values(world));
+            if(hits.length > 0 && hits[0].distance < 5) {
+                const pos = hits[0].point.add(hits[0].face.normal.multiplyScalar(0.5));
+                addBlock(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), grassMat);
+            }
+        }
+
+        // 8. GAME LOOP - OPTIMIZED
+        let player = { onGround: false };
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // FPS Counter
+            frameCount++;
+            if(performance.now() - lastTime > 1000) {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0; lastTime = performance.now();
+            }
+
+            // Movement
+            const speed = 0.1;
+            const dir = new THREE.Vector3(joystick.x, 0, joystick.y);
+            dir.applyAxisAngle(new THREE.Vector3(0,1,0), camRot.y);
+            velocity.x = dir.x * speed;
+            velocity.z = dir.z * speed;
+
+            // Gravity
+            velocity.y -= 0.015;
+            camera.position.add(velocity);
+
+            // Ground collision
+            if(camera.position.y < 2) {
+                camera.position.y = 2; velocity.y = 0; player.onGround = true;
+            } else player.onGround = false;
+
+            // Camera rotation
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = camRot.y;
+            camera.rotation.x = camRot.x;
+
+            // CULLING - A hla block hide = lem lo
+            Object.values(world).forEach(block => {
+                block.visible = block.position.distanceTo(camera.position) < RENDER_DISTANCE;
+            });
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+  </html>
